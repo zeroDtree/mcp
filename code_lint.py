@@ -1,9 +1,19 @@
-from fastmcp import FastMCP
-import subprocess
-import tempfile
 import os
-from typing import Dict, Any, List, Optional
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
+from fastmcp import FastMCP
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from config_loader import load_server_config
+
+# Load configuration from YAML
+config = load_server_config("code_lint")
 mcp = FastMCP("CodeLint")
 
 
@@ -158,8 +168,12 @@ def add_custom_linter(name: str, command: List[str]) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run(
-        transport="streamable-http",
-        host="0.0.0.0",
-        port=8001,
-    )
+    # stdio transport doesn't need host/port
+    if config["transport"] == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(
+            transport=config["transport"],
+            host=config["host"],
+            port=config["port"],
+        )

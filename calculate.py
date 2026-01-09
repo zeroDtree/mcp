@@ -1,7 +1,18 @@
-from fastmcp import FastMCP
 import math
+import sys
+from pathlib import Path
 
+from fastmcp import FastMCP
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from config_loader import load_server_config
+
+# Load configuration from YAML
+config = load_server_config("math")
 mcp = FastMCP("Math")
+
 
 # ----------------- Basic Float Operations -----------------
 @mcp.tool()
@@ -133,4 +144,12 @@ def bit_right_shift(a: int, b: int) -> int:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", port=8000, host="0.0.0.0")
+    # stdio transport doesn't need host/port
+    if config["transport"] == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(
+            transport=config["transport"],
+            host=config["host"],
+            port=config["port"],
+        )

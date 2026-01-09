@@ -1,0 +1,19 @@
+# MCP Server Configuration
+# This file configures the MCP servers (Math and CodeLint)
+
+# Global default configuration (applies to all servers if not overridden)
+# Default transport is "stdio" (no host/port needed)
+# For HTTP-based transports: "http", "sse", or "streamable-http"
+transport: "stdio"
+
+# Server-specific configurations
+# Uncomment and configure for HTTP-based transports
+math:
+  transport: "streamable-http"
+  host: "0.0.0.0"
+  port: 8000
+
+code_lint:
+  transport: "streamable-http"
+  host: "0.0.0.0"
+  port: 8001
