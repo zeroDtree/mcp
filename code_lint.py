@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -7,105 +8,71 @@ from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
 
-# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config_loader import load_server_config
+from config_loader import load_server_config, run_server
 
-# Load configuration from YAML
 config = load_server_config("code_lint")
 mcp = FastMCP("CodeLint")
 
-
-class ExternalLinter:
-    """Generic CLI-based linter"""
-
-    def __init__(self, name: str, command: List[str]):
-        self.name = name
-        self.command = command
-
-    def run(self, filepath: str) -> Dict[str, Any]:
-        try:
-            result = subprocess.run(
-                self.command + [filepath],
-                capture_output=True,
-                text=True,
-            )
-
-            if result.returncode == 0:
-                return {
-                    "success": True,
-                    "issues": [],
-                    "message": f"No issues found by {self.name}",
-                }
-
-            output = (result.stdout + result.stderr).strip()
-            return {
-                "success": False,
-                "issues": output.splitlines(),
-                "message": f"{self.name} found issues",
-            }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "issues": [],
-                "message": f"Error running {self.name}: {str(e)}",
-            }
+# Built-in linter definitions: name -> base command
+_BUILTIN_LINTERS: Dict[str, List[str]] = {
+    "pylint": ["pylint", "-E"],
+    "ruff": ["ruff", "check"],
+}
 
 
-class CodeLintService:
-    """Core lint service"""
+def _is_available(command: str) -> bool:
+    return shutil.which(command) is not None
 
-    def __init__(self):
-        self.linters: Dict[str, ExternalLinter] = {
-            "pylint": ExternalLinter("pylint", ["pylint", "-E"]),
-        }
 
-    def lint_file(self, filepath: str, linters: Optional[List[str]] = None) -> Dict[str, Any]:
-        if not os.path.exists(filepath):
-            return {"success": False, "message": f"File not found: {filepath}"}
-
-        linters = linters or list(self.linters.keys())
-        results = {}
-
-        for name in linters:
-            linter = self.linters.get(name)
-            if not linter:
-                results[name] = {
-                    "success": False,
-                    "message": f"Unknown linter: {name}",
-                }
-                continue
-
-            results[name] = linter.run(filepath)
-
-        success = all(r.get("success", False) for r in results.values())
-
+def _run_linter(name: str, command: List[str], filepath: str) -> Dict[str, Any]:
+    if not _is_available(command[0]):
         return {
-            "success": success,
-            "results": results,
-            "message": f"Linting completed for {filepath}",
+            "success": False,
+            "issues": [],
+            "message": f"Linter '{name}' not found. Install it with: pip install {name}",
         }
+    try:
+        result = subprocess.run(
+            command + [filepath],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return {"success": True, "issues": [], "message": f"No issues found by {name}"}
 
-    def lint_code(self, code: str, linters: Optional[List[str]] = None) -> Dict[str, Any]:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            f.write(code)
-            temp_path = f.name
+        output = (result.stdout + result.stderr).strip()
+        return {"success": False, "issues": output.splitlines(), "message": f"{name} found issues"}
 
-        try:
-            return self.lint_file(temp_path, linters)
-        finally:
-            os.unlink(temp_path)
-
-    def add_linter(self, name: str, command: List[str]):
-        self.linters[name] = ExternalLinter(name, command)
-
-    def list_linters(self) -> List[str]:
-        return list(self.linters.keys())
+    except Exception as e:
+        return {"success": False, "issues": [], "message": f"Error running {name}: {e}"}
 
 
-service = CodeLintService()
+# Registry: name -> command list (supports custom linters added at runtime)
+_linter_registry: Dict[str, List[str]] = dict(_BUILTIN_LINTERS)
+
+
+def _lint_filepath(filepath: str, linters: Optional[List[str]] = None) -> Dict[str, Any]:
+    if not os.path.exists(filepath):
+        return {"success": False, "results": {}, "message": f"File not found: {filepath}"}
+
+    targets = linters or list(_linter_registry.keys())
+    results: Dict[str, Any] = {}
+
+    for name in targets:
+        command = _linter_registry.get(name)
+        if command is None:
+            results[name] = {"success": False, "issues": [], "message": f"Unknown linter: {name}"}
+            continue
+        results[name] = _run_linter(name, command, filepath)
+
+    return {
+        "success": all(r.get("success", False) for r in results.values()),
+        "results": results,
+        "message": f"Linting completed for {filepath}",
+    }
+
 
 # ---------------- MCP Tools ----------------
 
@@ -113,16 +80,16 @@ service = CodeLintService()
 @mcp.tool()
 def lint_python_file(filepath: str, linters: Optional[List[str]] = None) -> Dict[str, Any]:
     """
-    Lint a Python file by absolute file path.
+    Lint a Python file by its absolute path.
 
     Args:
         filepath: Absolute path to the Python file.
-        linters: Optional list of linter names to run.
+        linters: Optional list of linter names. Available: pylint, ruff.
 
     Returns:
         Linting results as a dictionary.
     """
-    return service.lint_file(filepath, linters)
+    return _lint_filepath(filepath, linters)
 
 
 @mcp.tool()
@@ -132,23 +99,29 @@ def lint_python_code(code: str, linters: Optional[List[str]] = None) -> Dict[str
 
     Args:
         code: Python source code.
-        linters: Optional list of linter names to run.
+        linters: Optional list of linter names. Available: pylint, ruff.
 
     Returns:
         Linting results as a dictionary.
     """
-    return service.lint_code(code, linters)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(code)
+        temp_path = f.name
+    try:
+        return _lint_filepath(temp_path, linters)
+    finally:
+        os.unlink(temp_path)
 
 
 @mcp.tool()
-def list_available_linters() -> List[str]:
+def list_available_linters() -> Dict[str, Any]:
     """
-    List all available linters.
+    List all registered linters and whether they are installed.
 
     Returns:
-        A list of linter names.
+        A dict mapping linter name to its availability status.
     """
-    return service.list_linters()
+    return {name: {"available": _is_available(cmd[0]), "command": cmd} for name, cmd in _linter_registry.items()}
 
 
 @mcp.tool()
@@ -157,23 +130,21 @@ def add_custom_linter(name: str, command: List[str]) -> Dict[str, Any]:
     Register a custom linter.
 
     Args:
-        name: Name of the custom linter.
-        command: Command used to invoke the linter.
+        name: Name of the linter.
+        command: Command used to invoke the linter (e.g. ["mypy", "--strict"]).
 
     Returns:
-        Success status and message.
+        Success status and availability of the linter binary.
     """
-    service.add_linter(name, command)
-    return {"success": True, "message": f"Added linter: {name}"}
+    _linter_registry[name] = command
+    available = _is_available(command[0])
+    return {
+        "success": True,
+        "available": available,
+        "message": f"Registered linter '{name}'"
+        + ("" if available else f" (warning: '{command[0]}' not found in PATH)"),
+    }
 
 
 if __name__ == "__main__":
-    # stdio transport doesn't need host/port
-    if config["transport"] == "stdio":
-        mcp.run(transport="stdio")
-    else:
-        mcp.run(
-            transport=config["transport"],
-            host=config["host"],
-            port=config["port"],
-        )
+    run_server(mcp, config)

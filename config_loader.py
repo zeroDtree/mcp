@@ -9,6 +9,18 @@ from typing import Any, Dict, Optional
 from omegaconf import OmegaConf
 
 
+def run_server(mcp: Any, config: Dict[str, Any]) -> None:
+    """Start an MCP server using the given configuration."""
+    if config["transport"] == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(
+            transport=config["transport"],
+            host=config["host"],
+            port=config["port"],
+        )
+
+
 def load_server_config(server_name: str, config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load configuration for a specific MCP server from YAML file.
