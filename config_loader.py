@@ -4,9 +4,9 @@ Loads server configuration from YAML files.
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 
 def run_server(mcp: Any, config: Dict[str, Any]) -> None:
@@ -34,9 +34,9 @@ def load_server_config(server_name: str, config_path: Optional[str] = None) -> D
         Note: stdio transport doesn't require host/port.
     """
     if config_path is None:
-        config_path = Path(__file__).parent / "config.yaml"
+        resolved_path = Path(__file__).parent / "config.yaml"
     else:
-        config_path = Path(config_path)
+        resolved_path = Path(config_path)
 
     # Default configuration (stdio doesn't need host/port)
     defaults = {
@@ -51,12 +51,14 @@ def load_server_config(server_name: str, config_path: Optional[str] = None) -> D
         "port": default_port,
     }
 
-    if not config_path.exists():
+    if not resolved_path.exists():
         return {"transport": "stdio"}
 
     try:
         # Load config using OmegaConf
-        cfg = OmegaConf.load(config_path)
+        cfg = OmegaConf.load(resolved_path)
+        if not isinstance(cfg, DictConfig):
+            return {"transport": "stdio"}
 
         # Get server-specific config or use root-level config
         if server_name in cfg:
@@ -65,7 +67,10 @@ def load_server_config(server_name: str, config_path: Optional[str] = None) -> D
             server_cfg = cfg
 
         # Merge with defaults
-        config = OmegaConf.merge(OmegaConf.create(default_config), server_cfg)
+        config = cast(
+            DictConfig,
+            OmegaConf.merge(OmegaConf.create(default_config), server_cfg),
+        )
 
         # Validate transport (must be one of: stdio, http, sse, streamable-http)
         valid_transports = {"stdio", "http", "sse", "streamable-http"}
@@ -85,6 +90,6 @@ def load_server_config(server_name: str, config_path: Optional[str] = None) -> D
             "port": config.get("port", default_port),
         }
     except Exception as e:
-        print(f"Warning: Failed to load config for {server_name} from {config_path}: {e}")
+        print(f"Warning: Failed to load config for {server_name} from {resolved_path}: {e}")
         print("Using default configuration")
         return {"transport": "stdio"}

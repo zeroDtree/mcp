@@ -97,13 +97,15 @@ def lcm(a: int, b: int) -> int:
 
 
 @mcp.tool()
-def fast_power(base: int, exponent: int, mod: int = None) -> int:
+def fast_power(base: int, exponent: int, mod: int | None = None) -> int:
     """
     Fast exponentiation using Python's built-in pow().
     If mod is provided, computes (base ** exponent) % mod efficiently.
     """
     if exponent < 0:
         raise ValueError("Exponent must be non-negative for fast_power.")
+    if mod is None:
+        return pow(base, exponent)
     return pow(base, exponent, mod)
 
 
