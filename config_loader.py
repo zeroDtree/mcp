@@ -42,6 +42,7 @@ def load_server_config(server_name: str, config_path: Optional[str] = None) -> D
     defaults = {
         "math": {"port": 8000},
         "code_lint": {"port": 8001},
+        "knowledge_graph": {"port": 8002},
     }
     default_port = defaults.get(server_name, {}).get("port", 8000)
 
